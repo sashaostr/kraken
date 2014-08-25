@@ -134,6 +134,63 @@ class HiveUtils(object):
         self.hivecmd = ['hive'] + self.options + ['cli', '--database', self.database]
         self.tables  = {}
 
+    def add_missing_partitions(self, table):
+        add_partition_ddl = self.get_missing_partitions_ddl(table)
+        self.query(add_partition_ddl)
+
+
+    def get_missing_partitions_ddl(self, table):
+        missing_partitions = self.get_missing_partitions(table) #['orange/2014/08/13', 'orange/2014/08/14']
+        if len(missing_partitions) == 0:
+            return
+
+        partitions_definition = self.get_partitions_definition(table) #['tenant','year','month','day']
+
+        #PARTITION (tenant='orange', year='2014', month='08', day='13') LOCATION 'orange/2014/08/13'
+        #PARTITION (tenant='orange', year='2014', month='08', day='14') LOCATION 'orange/2014/08/14'
+
+        part_ddls = []
+        for mp in missing_partitions:
+            #['ALTER TABLE %s ADD %s;' % (table, ddl) for table,ddl in zip(tables,ddls)]
+            parts = ','.join(['%s=\'%s\'' % (part, val) for part, val in zip(partitions_definition, mp.split('/'))])
+            part_ddl = ' '.join(['PARTITION (', parts, ') LOCATION', '\''+ mp + '\''])
+            part_ddls.append(part_ddl)
+        #print(part_ddls)
+
+        return 'ALTER TABLE %s ' % table + 'ADD IF NOT EXISTS ' + ' '.join(part_ddls)
+
+
+    def get_missing_partitions(self, table):
+        msck_cmd = 'MSCK REPAIR TABLE %s ' % table
+        #cmd = ' '.join([' '.join(self.hivecmd), '-e', command])
+        #print(msck_cmd)
+        msck_out = self.query(msck_cmd)
+        missing_partitions = []
+        #print(msck_out)
+        for t in msck_out.split('\t'):
+            if table in t:
+                # missing_partitions.append({'location': t, 'parts': t.split(':')[1].split('/')})
+                missing_partitions.append(t.split(':')[1])
+
+        # re_compile = re.compile('%s:(.*) ' % table, re.MULTILINE)
+        # missing_partitions = re.findall(re_compile, msck_out)
+        #print(missing_partitions)
+        return missing_partitions
+
+
+    def get_partitions_definition(self, table):
+        cmd = ' '.join(self.hivecmd) + ' -e \'SHOW CREATE TABLE ' + table + ';\' | sed -n \'/PARTITIONED BY (/,/)/p\' | grep -v \'PARTITIONED BY\' '
+        partitions = sh(cmd).split(',')
+        #print(partitions)
+        pattern = re.compile('.*`(.+)`', re.MULTILINE)
+        parts = []
+        for pstr in partitions:
+            match = re.search(pattern, pstr)
+            part = match.group(1)
+            parts.append(part)
+
+        #print(parts)
+        return parts
 
 
     def tables_get(self):
@@ -258,11 +315,11 @@ class HiveUtils(object):
         # cache results for later
         if not 'interval' in self.tables[table].keys():
 
-            # TODO: Use self.table_schema and a regex 
+            # TODO: Use self.table_schema and a regex
             # rather than running SHOW CREATE TABLE AGAIN!
 
             # counts the number of partition keys this table has
-            # and returns a string time interval based in this number        
+            # and returns a string time interval based in this number
             cmd = ' '.join(self.hivecmd) + ' -e \'SHOW CREATE TABLE ' + table + ';\' | sed -n \'/PARTITIONED BY (/,/)/p\' | grep -v \'PARTITIONED BY\' | wc -l'
             partition_depth = int(sh(cmd))
 

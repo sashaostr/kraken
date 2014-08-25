@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+""" Automatically adds Hive partitions based on time bucketed HDFS directory hierarchy.
+
+Usage: hive-partitioner [options] <datadir>
+    
+Options:
+    -h --help                           Show this help message and exit.
+    -D --database=<dbname>              Hive database name.  [default: default]
+    -t --tables=<table1[,table2...]>    Tables to create partitions for.  If not specified,
+                                        all directories found in <datadir> will be partitioned.
+    -o --hive-options=<options>         Any valid Hive CLI options you want to pass to Hive commands.
+                                        Example: '--auxpath /path/to/hive-serdes-1.0-SNAPSHOT.jar'
+    -v --verbose                        Turn on verbose debug logging.
+    -n --dry-run                        Don't actually create any partitions, just output the Hive queries to add partitions.
+"""
+__author__ = 'Andrew Otto <otto@wikimedia.org>'
+
+from   datetime import datetime
+from   docopt   import docopt
+import logging
+
+from util import HiveUtils, HdfsDatasetUtils, diff_datewise, interval_hierarchies
+
+if __name__ == '__main__':
+    # parse arguments
+    arguments = docopt(__doc__)
+    # print(arguments)
+
+    datadir                = arguments['<datadir>']
+    database               = arguments['--database']
+    tables                 = arguments['--tables']
+    hive_options           = arguments['--hive-options']
+    verbose                = arguments['--verbose']
+    dry_run                = arguments['--dry-run']
+
+    log_level = logging.INFO
+    if verbose:
+        log_level = logging.DEBUG
+
+    logging.basicConfig(level=log_level,
+                        format='%(asctime)s %(levelname)-6s %(message)s',
+                        datefmt='%Y-%m-%dT%H:%M:%S')
+
+    if tables:
+        tables = tables.split(',')
+
+    hive = HiveUtils(database, hive_options)
+    for table in tables:
+        if hive.table_exists(table):
+            if dry_run:
+                logging.info(str(hive.get_missing_partitions_ddl(table)))
+            else:
+                hive.add_missing_partitions(table)
+
+
+
+#hdfs  = HdfsDatasetUtils(datadir)
+
+    # if tables:
+    #     tables = tables.split(',')
+    # else:
+    #     tables = hdfs.datasets()
+    #
+    # for table in tables:
+    #     if hive.table_exists(table):
+    #         interval         = hive.partition_interval(table)
+    #         hive_partitions  = hive.partitions(table)
+    #         hdfs_partitions  = hdfs.partitions(table, interval)
+    #
+    #         # logging.debug(("Hive Partitions for %s:\n" % table) + '\n'.join(hive_partitions))
+    #         # logging.debug(("HDFS Partitions for %s:\n " % table) + '\n'.join(hdfs_partitions))
+    #         # logging.debug("%s import interval is %s" % (table, interval))
+    #
+    #         # diff the hdfs dataset and hive table partitions
+    #         missing_hive, missing_hdfs = diff_datewise(hdfs_partitions, hive_partitions,
+    #             interval_hierarchies[interval]['directory_format'],
+    #             interval_hierarchies[interval]['hive_partition_format'])
+    #
+    #         if not missing_hive:
+    #             logging.info("No partitions need added for table %s." % table)
+    #         elif dry_run:
+    #             print(hive.add_partitions_ddl(table, missing_hive))
+    #         else:
+    #             logging.info("Adding %d partitions to table %s." % (len(missing_hive), table))
+    #             hive.create_partitions(table, missing_hive)
+    #     else:
+    #         logging.warning('Table {0} does not exist, skipping.'.format(table))
