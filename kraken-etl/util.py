@@ -136,7 +136,8 @@ class HiveUtils(object):
 
     def add_missing_partitions(self, table):
         add_partition_ddl = self.get_missing_partitions_ddl(table)
-        self.query(add_partition_ddl)
+        if (add_partition_ddl and len(add_partition_ddl)>0):
+            self.query(add_partition_ddl)
 
 
     def get_missing_partitions_ddl(self, table):
